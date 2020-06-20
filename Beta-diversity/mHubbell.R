@@ -1,0 +1,299 @@
+#' @title Hubbell Simulation
+
+#' @description Simulate species abundances with the basic Hubbell model.
+
+#' @details For a recent review on the Hubbell model, see Rosindell, Hubbell and Etienne, 2011.
+
+#' @param N species number in the local community
+
+#' @param M species number in the metacommunity
+
+#' @param I number of individuals
+
+#' @param y initial species proportions in the local community, should sum to one
+
+#' @param m.vector species proportions in the metacommunity, should sum to one
+
+#' @param m immigration rate (probability that a dead individuum is replaced by an individuum from the metacommunity)
+
+#' @param d number of deaths at each time step
+
+#' @param tskip number of initial time points to be skipped when returning the result (to avoid the transient)
+
+#' @param tend number of time points (i.e. the number of generations)
+
+#' @param perturb a perturbation object
+
+#' @return a matrix with species abundances as rows and time points as columns
+
+#' @references Rosindell, Hubbell and Etienne (2011). The Unified Neutral Theory of Biodiversity and Biogeography at Age Ten. Trends in Ecology and Evolution, vol. 26 (7), 340-348.
+
+#' @seealso \code{\link{simUntb}} for the neutral model with the \pkg{untb} package
+
+#' @examples
+
+#' \dontrun{
+
+#'   N <- 50
+
+#'   M <- 500
+
+#'   metapop <- generateAbundances(N = M, mode = 5, probabs = TRUE)
+
+#'   tsplot(simHubbell(N = N, M = M, I = 3000, d = N, m.vector = metapop, tskip=500, tend=1000))
+
+#' }
+
+#' @export
+
+msimHubbell<-function(N=50, M=500, I=500, y=rep(1/N,N), m.vector=rep(1/M,M), i.vector = i.vector, m=0.02, d=10, tskip=0, tend=100, perturb=NULL){
+  
+  if(sum(m.vector) != 1){
+    
+    stop("Species proportions in the metacommunity need to sum to one.")
+    
+  }
+  
+  if(sum(y) != 1){
+    
+    stop("Initial species probabilities need to sum to one.")
+    
+  }
+  
+  if(tskip >= tend){
+    
+    stop("The period to be skipped is as large as the entire simulation period!")
+    
+  }
+  
+  
+  
+  gridsize=round(sqrt(I))
+  
+  # fill grid with ones
+  
+  grid=matrix(1,nrow=gridsize, ncol=gridsize)
+  
+  S=c(1:N)
+  
+  Smeta=c(1:M)
+  
+  # initialize the grid such that each species is selected according to its initial probability
+  
+  for(i in 1:gridsize){
+    
+    for(j in 1:gridsize){
+      
+      grid[i,j]=sample(S,1,prob=y)
+      
+    }
+    
+  }
+  
+  # replace some individuals, according to the specified starting configuration
+  
+  if(!is.null(i.vector)){
+    
+    for(r in 1:length(i.vector)){
+      
+      i <- sample(gridsize, 1)
+      
+      j <- sample(gridsize, 1)
+      
+      grid[i,j] <- i.vector[r]
+      
+    }
+    
+  }
+  
+  # count up to M, since new species may appear later from the metacommunity
+  
+  counts=countSpecies(grid,M)
+  
+  
+  
+  tseries=matrix(NA,nrow=M,ncol=(tend-tskip))
+  
+  tseriesCounter=1
+  
+  perturbCounter=1
+  
+  durationCounter=1
+  
+  perturbationOn=FALSE
+  
+  ori.deathrate=d
+  
+  ori.m.vector=m.vector
+  
+  
+  
+  if(tskip==0){
+    
+    tseries[,tseriesCounter]=counts
+    
+    tseriesCounter=tseriesCounter+1
+    
+  }
+  
+  
+  
+  for(t in 2:tend){
+    
+    
+    
+    if(!is.null(perturb)){
+      
+      # neutral model: carrying capacity is kept constant
+      
+      perturb$capacityConstant=TRUE
+      
+      applied=applyPerturbation(perturb, t=tseriesCounter, perturbCounter=perturbCounter, durationCounter=durationCounter, perturbationOn=perturbationOn, ori.growthrates=ori.m.vector, abundances=counts)
+      
+      durationCounter=applied$durationCounter
+      
+      perturbCounter=applied$perturbCounter
+      
+      perturbationOn=applied$perturbationOn
+      
+      if(perturbationOn==TRUE && !is.na(perturb$deathrate)){
+        
+        if(length(perturb$deathrate)>1){
+          
+          warning("Perturbation death rate should be a constant! It is not applied.")
+          
+        }else{
+          
+          d=perturb$deathrate
+          
+        }
+        
+      }else{
+        
+        d=ori.deathrate
+        
+      }
+      
+      m.vector=applied$growthrates
+      
+      counts=applied$abundances
+      
+    }
+    
+    
+    
+    z1=ceiling(gridsize*runif(d)) # x positions in the grid, ceil is like round, but guarantees no integer smaller than 1 will occur
+    
+    z2=ceiling(gridsize*runif(d)) # y positions in the grid
+    
+    z=runif(d) # generate d uniformly distributed values
+    
+    # bug spotted by Alex: the smaller the immigration rate, the more immigrants, fixed 09/Dec/2016
+    
+    #immigrants=as.numeric(z>=m)
+    
+    #locals=as.numeric(z<m)
+    
+    immigrants=as.numeric(z<=m)
+    
+    locals=as.numeric(z>m)
+    
+    # immigration probabs
+    
+    immiprobabs=immigrants*randp(d,m.vector,Smeta)
+    
+    # local replacement probabs
+    
+    localprobabs=locals*randp(d,(counts/sum(counts)),Smeta)
+    
+    r=immiprobabs+localprobabs
+    
+    # replace dead individuals with local or immigrated ones
+    
+    for(i in 1:d){
+      
+      grid[z1[i],z2[i]]=r[i]
+      
+    }
+    
+    
+    
+    # update counts
+    
+    counts=countSpecies(grid,M)
+    
+    
+    
+    if(t > tskip){
+      
+      tseries[,tseriesCounter]=counts
+      
+      tseriesCounter=tseriesCounter+1
+      
+    }
+    
+    
+    
+  } # simulation until end
+  
+  return(tseries)
+  
+}
+
+
+
+# count the number of occurrences of each species
+
+# species are indexed from 1 to N
+
+countSpecies<-function(grid,N){
+  
+  counts=c()
+  
+  for(i in 1:N){
+    
+    indices=which(grid==i)
+    
+    count=0
+    
+    if(length(indices) > 0){
+      
+      count=length(indices)
+      
+    }
+    
+    counts=c(counts,count)
+    
+  }
+  
+  return(counts)
+  
+}
+
+
+
+# Generate d integer values (d: number of dead individuals)
+
+# where integers from vector v are selected with
+
+# probability m.vector.
+
+randp<-function(d,m.vector,v){
+  
+  if(length(m.vector) != length(v)){
+    
+    stop("randp: Both vectors must have the same length!")
+    
+  }
+  
+  r=c()
+  
+  for(i in 1:d){
+    
+    r=c(r,sample(v,1,prob=m.vector))
+    
+  }
+  
+  return(r)
+  
+}

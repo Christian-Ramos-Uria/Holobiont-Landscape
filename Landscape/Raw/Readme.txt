@@ -1,0 +1,1 @@
+This folder is meant to store the raw datasets. There are three datasets, each with it's own sub-folder: 'Human_Raw', 'Mosquito_Raw' and 'Plant_Raw'. Please download the datasets from their corresponding databases (see the paper) before attempting to run the 'Raw*' and 'Dada2*' scripts.
